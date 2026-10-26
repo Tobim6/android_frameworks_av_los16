@@ -122,6 +122,12 @@ CameraService::CameraService() :
     mServiceLockWrapper = std::make_shared<WaitableMutexWrapper>(&mServiceLock);
 }
 
+// AGS2: the Huawei camera provider reports device status from inside getVendorTags(), i.e. nested
+// on the thread that is in enumerateProviders() holding mServiceLock. Handling it there deadlocks
+// (updateCameraNumAndIds() takes mServiceLock) or touches state that does not exist yet. The devices
+// are added by enumerateProviders() itself once the vendor tags are set up, so drop such callbacks.
+static thread_local bool sSettingUpVendorTags = false;
+
 void CameraService::onFirstRef()
 {
     ALOGI("CameraService process starting");
@@ -167,7 +173,9 @@ status_t CameraService::enumerateProviders() {
         // Setup vendor tags before we call get_camera_info the first time
         // because HAL might need to setup static vendor keys in get_camera_info
         // TODO: maybe put this into CameraProviderManager::initialize()?
+        sSettingUpVendorTags = true;
         mCameraProviderManager->setUpVendorTags();
+        sSettingUpVendorTags = false;
 
         if (nullptr == mFlashlight.get()) {
             mFlashlight = new CameraFlashlight(mCameraProviderManager, this);
@@ -272,6 +280,12 @@ void CameraService::onDeviceStatusChanged(const String8& id,
         CameraDeviceStatus newHalStatus) {
     ALOGI("%s: Status changed for cameraId=%s, newStatus=%d", __FUNCTION__,
             id.string(), newHalStatus);
+
+    if (sSettingUpVendorTags) {
+        ALOGW("%s: ignoring status change of camera %s reported while setting up vendor tags",
+                __FUNCTION__, id.string());
+        return;
+    }
 
     StatusInternal newStatus = mapToInternal(newHalStatus);
 

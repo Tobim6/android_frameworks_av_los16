@@ -967,14 +967,9 @@ void Camera2Client::stopPreviewL() {
                         __FUNCTION__, mCameraId, strerror(-res), res);
             }
 
-            // Flush all in-process captures and buffer in order to stop
-            // preview faster.
-            res = mDevice->flush();
-            if (res != OK) {
-                ALOGE("%s: Camera %d: Unable to flush pending requests: %s (%d)",
-                        __FUNCTION__, mCameraId, strerror(-res), res);
-            }
-
+            // AGS2: the Huawei camera HAL drops the result metadata of in-flight requests when it is
+            // flushed, so waitUntilDrained() would time out. Let the pipeline drain by itself (the
+            // Android 8 behaviour) instead of flushing it.
             res = mDevice->waitUntilDrained();
             if (res != OK) {
                 ALOGE("%s: Camera %d: Waiting to stop streaming failed: %s (%d)",
@@ -1995,12 +1990,8 @@ status_t Camera2Client::createJpegStreamL(Parameters &params) {
         return res;
     }
 
-    res = mDevice->flush();
-    if (res != OK) {
-        ALOGE("%s: Camera %d: Unable flush device: %s (%d)",
-                __FUNCTION__, mCameraId, strerror(-res), res);
-        return res;
-    }
+    // AGS2: no mDevice->flush() here, the Huawei camera HAL loses the results of flushed requests and
+    // waitUntilDrained() would then never complete; draining naturally works (Android 8 behaviour).
 
     // Ideally we don't need this, but current camera device
     // status tracking mechanism demands it.
